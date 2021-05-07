@@ -1,0 +1,636 @@
+---
+title: "Adult Census USA 1994"
+author: "Martin Knell"
+date: "06/05/2021"
+output: pdf_document
+---
+
+# 1. Overview
+
+This project is part of the Capstone Assignment of the HarvardX Professional Certificate in Data Science Program. For the CYO (Choose Your Own) project a US 1994 Census data set was chosen. The data set forms part of a Kaggle challenge available under the following web link:
+
+### https://www.kaggle.com/uciml/adult-census-income
+
+This Kaggle challenge is one of a selection of curated project challenges as per the link provided in the instructions for this capstone assignment.
+
+The census data set contains information on individuals surveyed including whether the individual has an income above or below 50k. The prediction task is to determine whether a person makes over 50k a year. 
+
+
+## 1.1 Introduction
+
+Census surveys are regularly performed in most countries around the world. These surveys usually connect certain live outcomes (e.g. income, health, wealth etc.) with the distribution of general population characteristics (e.g. education, cultural background, etc.). 
+
+The 1994 US Census that was chosen for this project contains information about education, work, relationship status, gender and cultural background of the individuals surveyed. It also has the information whether the individual makes above or below 50k per year. The objective of this project is to predict whether an individual will fall into the above or below 50k income bracket. 
+
+In 1994 the US median income was 33,178 dollars. 50,000 in 1994 is equivalent to the purchasing power of 89,364 today. 90k is 87th percentile in the US today. That means with the prediction task in this project we effectively predict high income earners (top 15%). 
+
+
+## 1.2 Success Measure
+
+Given the classification problem, the success measure for this project is the accuracy of the predictive model. We will look at overall accuracy. The split into sensitivity and specificity is not relevant for this problem, given that a false positive (wrongly forecasting that a low income earner makes above 50k) is not better or worse than a false negative (wrongly forecasting that a high income earner makes below 50k). Only the overall accuracy of predictions matters here.
+
+
+## 1.3 Data Set
+
+The data set for this assignment is available, along with the other submission documents, from my public GitHub link:
+
+### https://github.com/MKnell-DA/Adult-Census
+
+Please download the entire repo and use as working directory.
+
+```{r, echo=FALSE, results=FALSE, warning=FALSE, message=FALSE}
+##########################################################
+# Load Libraries
+##########################################################
+
+if(!require(dslabs)) install.packages("dslabs", repos = "http://cran.us.r-project.org")
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+if(!require(ggplot2)) install.packages("ggplot2", repos = "http://cran.us.r-project.org")
+if(!require(readr)) install.packages("readxl", repos = "http://cran.us.r-project.org")
+if(!require(rockchalk)) install.packages("rockchalk", repos = "http://cran.us.r-project.org")
+if(!require(varImp)) install.packages("varImp", repos = "http://cran.us.r-project.org")
+if(!require(gbm)) install.packages("gbm", repos = "http://cran.us.r-project.org")
+
+
+library(dslabs)
+library(tidyverse)
+library(caret)
+library(ggplot2)
+library(readr)
+library(rockchalk)
+library(varImp)
+library(gbm)
+
+
+##########################################################
+# Load data set
+##########################################################
+
+# Note: Please download GitHub repo and use as working directory
+# https://github.com/MKnell-DA/Adult-Census
+
+adult <- read.csv("./adult.csv")
+```
+
+# 2. Data Wrangling and Cleaning
+
+The census data set has the below structure
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+head(adult)
+```
+
+The below is the summary information for the raw data set
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+summary(adult)
+```
+
+The main variables in the data set are:
+
+
+### Dependent Variable/ Target:
+
+Income: Two income brackets provided, above and below 50k
+
+
+### Input Variables/ Features:
+
+Age: Age of person in survey
+
+Workclass: Type of work including private, self-employed, government, without pay, never worked
+
+Education: Level of education including school, college, bachelors, mastes and doctorate, grade of education
+
+Relationship Status: Includes married, never married and separated/ widowed/ divorced
+
+Occupation: Major job type classifications across blue colour, white colour, management and specialist roles
+
+Race: Cultural background, e.g. black, white or asian
+
+Gender: male and female
+
+Other: Country of birth, capital gain and work hours per week
+
+This information and the subset of variables under each main variable will be explored in more detail in the next chapter.
+
+
+To have a clean data set for modeling we will disregard rows where information is missing. By doing this we forego approx. 7% of the original information. This is acceptable as the remaining 93% of survey results can still be regarded as representative.
+
+```{r, echo=FALSE, results=FALSE, warning=FALSE, message=FALSE}
+adult[adult == "?"] <- NA
+adult <- na.omit(adult)
+```
+
+The following additional data cleaning steps were taken:
+
+1. Convert categorical variables into factors
+2. Convert income brackets into "1" for above 50k and "0" for below or equal to 50k
+3. Deselect a weighting column in the data set that is not needed for modeling (the model will derive it's own view on variable importance)
+
+```{r, echo=FALSE, results=FALSE, warning=FALSE, message=FALSE}
+
+  # convert factor variables into factors
+
+adult$workclass <- factor(adult$workclass)
+adult$marital.status <- factor(adult$marital.status)
+adult$occupation <- factor(adult$occupation)
+adult$relationship <- factor(adult$relationship)
+adult$race <- factor(adult$race)
+adult$native.country <- factor(adult$native.country)
+adult$sex <- factor(adult$sex)
+adult$education <- factor(adult$education)
+
+   # Change income information to 1 for >50k and 0 for <=50k
+
+adult$income <- as.numeric(ifelse(adult$income == ">50K", 1, 0))
+
+  # discard fnlwgt column
+
+census <- adult %>% select(-fnlwgt) 
+```
+
+The summary information for the cleaned data set is provided below
+
+```{r, warning=FALSE, message=FALSE}
+nrow(census)
+summary(census)
+```
+
+
+# 3. Data Exploration
+
+## 3.1 Income Distribution by Age
+
+Figure 1 shows the age distribution in each income bracket <=50k (0) and >50k (1). As we would expect earning potential increases with years of work experience. The median age in the below 50k income bracket is 34 compared to 43 in the above 50k income bracket. Based on this distribution we would expect age to come out as one of the key predictors of income in the modeling. 
+
+### Figure 1: Age Distribution by Income Bracket
+
+```{r, warning=FALSE, message=FALSE}
+age_plot <- census %>% ggplot(aes(x = as.factor(income), y= age)) + geom_boxplot() +
+  theme_classic(base_size = 10) + xlab("income bracket") + 
+  ggtitle("age distribution by income bracket")
+age_plot
+
+median(census$age[census$income == 0])
+median(census$age[census$income == 1])
+```
+
+## 3.2 Income Distribution by Work Class
+
+Figure 2 shows the income distribution by work class. Self employed individuals with an incorporated company show the highest likelihood of making above 50k. Interestingly government employees outperform private industry employees on earnings potential. Individuals working in the Federal Government have the second highest proportion of high income earners after self employed individuals with an incorporated company. 
+
+### Figure 2: Income Distribution by Work Class
+
+```{r, warning=FALSE, message=FALSE}
+work_plot <- census %>% ggplot(aes(x = workclass, fill = as.factor(income))) + 
+  geom_bar(position = "fill") + theme_classic(base_size = 10) + 
+  theme(axis.text.x = element_text(angle = 90)) + ylab("income distribution") + 
+  ggtitle("income distribution by work class") + labs(fill = "income bracket") 
+work_plot
+```
+
+
+## 3.3 Income Distribution by Grade of Education
+
+Figure 3 shows the income distribution by grade of education. There appears to be a very strong correlation between higher education and higher incomes. Based on this observation we expect grade of education to come out as a key predictor in the modeling. 
+
+### Figure 3: Income Distribution by Grade of Education
+
+```{r, warning=FALSE, message=FALSE}
+ed_grade_plot <- census %>% ggplot(aes(x = as.factor(education.num), fill = as.factor(income))) + 
+  geom_bar(position = "fill") + theme_classic(base_size = 10) + ylab("income distribution") + 
+  xlab("grade of education") + ggtitle("income distribution by grade of education") + 
+  labs(fill = "income bracket") 
+ed_grade_plot
+```
+
+
+## 3.4 Income Distribution by Education Level
+
+Figure 4 shows the income distribution by education level. This graph is consistent with Figure 3 and confirms that higher education increases the likelihood of obtaining higher incomes. 
+
+### Figure 4: Income Distribution by Education Level
+
+```{r, warning=FALSE, message=FALSE}
+ed_plot <- census %>% ggplot(aes(x = education, fill = as.factor(income))) + 
+  geom_bar(position = "fill") + theme_classic(base_size = 10) + 
+  theme(axis.text.x = element_text(angle = 90)) + ylab("income distribution") + 
+  ggtitle("income distribution by education level") + labs(fill = "income bracket") 
+ed_plot
+```
+
+We also find the census distinguishes various years of leaving school. However, this has little impact on earnings potential. We can therefore consolidate the groups of individuals that have not obtained education beyond school. Figure 5 shows the consolidated graph.
+
+### Figure 5: Income by Education Level ("School only" consolidated)
+
+```{r, warning=FALSE, message=FALSE}
+census$education <- combineLevels(census$education, 
+  levs = c("10th","11th","12th","1st-4th","5th-6th","7th-8th","9th","Preschool"), "School")
+
+ed_plot <- census %>% ggplot(aes(x = education, fill = as.factor(income))) + 
+  geom_bar(position = "fill") + theme_classic(base_size = 10) + 
+  theme(axis.text.x = element_text(angle = 90)) + ylab("income distribution") + 
+  ggtitle("income distribution by education level (new)") + labs(fill = "income bracket") 
+ed_plot
+```
+
+
+## 3.5 Income Distribution by Marital Status
+
+Figure 6 shows the income distribution by marital status. Interestingly individuals who are married appear to have a higher likelihood of making above 50k. We notice that this observation is co-linear with the age observation in Figure 1 given that very young workers are less likely to be married. We expect marital status to come out as a key predictor in the modeling. 
+
+### Figure 6: Income Distribution by Marital Status
+
+```{r, warning=FALSE, message=FALSE}
+marital_plot <- census %>% ggplot(aes(x = marital.status, fill = as.factor(income))) + 
+  geom_bar(position = "fill") + theme_classic(base_size = 10) + 
+  theme(axis.text.x = element_text(angle = 90)) + ylab("income distribution") + 
+  xlab("marital status") + ggtitle("income distribution by marital status") + 
+  labs(fill = "income bracket") 
+marital_plot
+```
+
+
+## 3.6 Income Distribution by Relationship Status
+
+Figure 7 shows the income distribution by relationship status. This graph is consistent with Figure 6 and confirms that individuals who are married have a higher likelihood of making above 50k.
+
+### Figure 7: Income Distribution by Relationship Status
+
+```{r, warning=FALSE, message=FALSE}
+relation_plot <- census %>% ggplot(aes(x = relationship, fill = as.factor(income))) + 
+  geom_bar(position = "fill") + theme_classic(base_size = 10) + 
+  theme(axis.text.x = element_text(angle = 90)) + ylab("income distribution") + 
+  xlab("relationship status") + ggtitle("income distribution by relationship status") + 
+  labs(fill = "income bracket") 
+relation_plot
+```
+
+Based on the observation in Figure 6 and 7 we can consolidate the individuals in the survey into "Married" and "Unmarried", which should improve predictions. Figure 8 below shows the consolidated graph. 
+
+### Figure 8: Income distribution by Marriage Status (consolidated)
+
+```{r, warning=FALSE, message=FALSE}
+  # Group into Married and Unmarried
+
+census$relationship <- combineLevels(census$relationship, 
+  levs = c("Husband","Wife"), "Married")
+
+census$relationship <- combineLevels(census$relationship, 
+  levs = c("Not-in-family","Other-relative","Own-child","Unmarried"), "Unmarried")
+
+relation_plot <- census %>% ggplot(aes(x = relationship, fill = as.factor(income))) + 
+  geom_bar(position = "fill") + theme_classic(base_size = 10) + 
+  theme(axis.text.x = element_text(angle = 90)) + ylab("income distribution") + 
+  xlab("relationship status") + ggtitle("income distribution by relationship status (new)") + 
+  labs(fill = "income bracket") 
+relation_plot
+```
+
+
+## 3.7 Income Distribution by Occupation
+
+Figure 9 shows the income distribution by occupation. Individuals in managerial and specialist roles have a higher likelihood of making over 50k, closely followed by sales and tech support. Administrative and blue color occupations are generally lower paid. 
+
+### Figure 9: Income Distribution by Occupation
+
+```{r, warning=FALSE, message=FALSE}
+occ_plot <- census %>% ggplot(aes(x = occupation, fill = as.factor(income))) + 
+  geom_bar(position = "fill") + theme_classic(base_size = 10) + 
+  theme(axis.text.x = element_text(angle = 90)) + ylab("income distribution") + 
+  xlab("occupation") + ggtitle("income distribution by occupation") + 
+  labs(fill = "income bracket") 
+occ_plot
+```
+
+
+## 3.8 Income Distribution by Race
+
+Figure 10 shows the income distribution by race. White and Asian American individuals have a higher likelihood to make above 50k. 
+
+### Figure 10: Income Distribution by Race
+
+```{r, warning=FALSE, message=FALSE}
+race_plot <- census %>% ggplot(aes(x = race, fill = as.factor(income))) + 
+  geom_bar(position = "fill") + theme_classic(base_size = 10) + 
+  theme(axis.text.x = element_text(angle = 90)) + ylab("income distribution") + 
+  xlab("race") + ggtitle("income bracket by race") + 
+  labs(fill = "income bracket") 
+race_plot
+```
+
+
+## 3.9 Income Distribution by Gender
+
+Figure 11 shows the income distribution by gender. Males are more likely to be in the higher income bracket than females. 
+
+### Figure 11: Income Distribution by Gender
+
+```{r, warning=FALSE, message=FALSE}
+gender_plot <- census %>% ggplot(aes(x = sex, fill = as.factor(income))) + 
+  geom_bar(position = "fill") + theme_classic(base_size = 10) + 
+  theme(axis.text.x = element_text(angle = 90)) + ylab("income distribution") + 
+  xlab("gender") + ggtitle("income bracket by gender") + 
+  labs(fill = "income bracket") 
+gender_plot
+```
+
+
+## 3.10 Income Distribution by Work Hours
+
+Figure 12 shows the income distribution by weekly work hours. We can see that interestingly there is no significant correlation between work hours and income. 
+
+### Figure 12: Weekly Work Hour Distribution by Income Bracket
+
+```{r, warning=FALSE, message=FALSE}
+hours_plot <- census %>% ggplot(aes(x = as.factor(income), y= hours.per.week)) + 
+  geom_boxplot() + theme_classic(base_size = 10) + xlab("income bracket") + 
+  ylab("work hours per week") +
+  ggtitle("work hours per week by income bracket")
+hours_plot
+
+median(census$hours.per.week[census$income == 0])
+median(census$hours.per.week[census$income == 1])
+```
+
+
+## Income Distribution by Capital Gain or Loss
+
+Figures 13 and 14 show the income distribution against reported capital gains or losses. There is no significant correlation here. 
+
+### Figure 13: Income Brackets against Capital Gain
+
+```{r, warning=FALSE, message=FALSE}
+gain_plot <- census %>% ggplot(aes(x = as.factor(income), y= capital.gain)) + 
+  geom_boxplot() + theme_classic(base_size = 10) + xlab("income bracket") + 
+  ylab("capital gain") + ggtitle("income bracket against capital gain")
+gain_plot
+```
+
+### Figure 14: Income Brackets against Capital Loss
+
+```{r, warning=FALSE, message=FALSE}
+loss_plot <- census %>% ggplot(aes(x = as.factor(income), y= capital.loss)) + 
+  geom_boxplot() + theme_classic(base_size = 10) + xlab("income bracket") + 
+  ylab("capital loss") + ggtitle("income bracket against capital loss")
+loss_plot
+```
+
+
+## 3.11 Income Distribution by Country of Birth
+
+Figure 15 shows the income distribution by country of birth. It can be seen that certain origins are associated with higher earnings potential. However there is no clear geographical pattern. 
+
+### Figure 15: Income Distribution by Country of Birth
+
+```{r, warning=FALSE, message=FALSE}
+country_plot <- census %>% ggplot(aes(x = native.country, fill = as.factor(income))) + 
+  geom_bar(position = "fill") + theme_classic(base_size = 10) + 
+  theme(axis.text.x = element_text(angle = 90)) + ylab("income distribution") + 
+  xlab("country of birth") + ggtitle("income distribution by country of birth") + 
+  labs(fill = "income bracket") 
+country_plot
+```
+
+
+## 3.12 Further Consolidaton of Data Set
+
+Based on the observations in the data exploration we decide to disregard the variables of work hours per week, capital gain and capital loss for modeling. We can also disregard marital status, as we have already consolidated marital status with relationship status. 
+
+The summary of the consolidated data set that will be used for modeling is provided below.
+
+```{r, warning=FALSE, message=FALSE}
+census <- census %>% select(-hours.per.week, - capital.gain, - capital.loss, - marital.status)
+summary(census)
+```
+
+
+# 4. Methods and Analysis
+
+We will split the available census data set into a training set (60%), a test set (20%) and a final validation set (20%). These splits are in line with general recommendations for this size of data set. The test set will be used to determine the accuracy performance of the individual models. The validation set will be used only once for the final model only. 
+
+We will compare a number of different machine learning approaches: Linear Discriminant Analysis (LDA), K nearest neighbours (Knn), Random Forest and Gradient Boosting Machines (GBM). All models will be trained using the R caret package with a specific grid search. 
+
+
+## 4.1 Model Preparation
+
+We split the census data set into a training set, test set and final validation set with below code.
+
+```{r, warning=FALSE, message=FALSE}
+##########################################################
+# Modeling Preparation
+##########################################################
+
+  # Converting income class into factor
+
+census$income = as.factor(census$income)
+
+
+  # Creating train, test and validation set
+
+validation_index <- createDataPartition(census$income, times = 1, p = 0.2, list = FALSE)
+validation <- census[validation_index,]
+remain <- census[-validation_index,]
+
+test_index <- createDataPartition(remain$income, times = 1, p = 0.25, list = FALSE)
+test <- remain[test_index,]
+train <- remain[-test_index,]
+
+nrow(train)
+nrow(test)
+nrow(validation)
+```
+
+
+## 4.2 Linear Discriminant Analysis (LDA)
+
+As a baseline for model comparison we  apply Linear Discriminant Analysis (LDA). Note that Quadratic Discriminant Analysis (QDA) delivers the same results and will therefore not be displayed here. 
+
+```{r, warning=FALSE, message=FALSE}
+lda.fit = train(income ~ ., data=train, method="lda", trControl = trainControl(method = "cv"))
+
+forecast <- predict(lda.fit, test)
+
+acc_lda <- mean(forecast == test$income)
+```
+
+### Model Performance: Linear Discriminant Analysis (LDA)
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+accuracy <- data_frame(method = "LDA", Accuracy = acc_lda)
+accuracy %>% knitr::kable()
+```
+
+
+## 4.3 K Nearest Neigbours (Knn)
+
+We apply a k nearest neighbors model with 10-fold repeated cross validation. The grid search will test k-values from 3 to 51 in increments of 2 (odd k-values are preferable for classification problems). Figure 16 shows the impact of different ks on accuracy. Best results are achieved with k = 31. The run time for this grid search is approx. 5-hours on a standard laptop. 
+
+```{r, warning=FALSE, message=FALSE}
+knn.fit = train(income ~ ., data = train, method = "knn", 
+                tuneGrid = data.frame(k = seq(3,51,2)), 
+                trControl = trainControl(method="repeatedcv",number = 10, repeats = 3))
+
+forecast <- predict(knn.fit, test)
+
+acc_knn <- mean(forecast == test$income)
+```
+
+### Figure 16: Grid Search Results and Best Tune - Knn
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+plot(knn.fit)
+knn.fit$bestTune
+```
+
+### Comparative Model Performance: K Nearest Neigbours (Knn)
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+accuracy <- bind_rows(accuracy, data_frame(method = "Knn", Accuracy = acc_knn))
+accuracy %>% knitr::kable()
+```
+
+
+## 4.4 Random Forest
+
+Random Forest is an ensemble decision tree model. While in GBM each subsequent tree systematically builds on the weakness of the previous tree, the trees in the Random Forest are random, including random selection of variables at each split of the tree. Accordingly the number of variables considered for splitting at each split of the tree is one of the key tuning parameters. 
+
+We run a Random Forest model with 10-fold repeated cross validation. We compare the impact on performance depending on the number of variables randomly selected for splitting at each node from 1 to 10 (all). Figure 17 shows the impact of this search. The grid search reveals that best results are achieved when all variables are considered for splitting. The Random Forest model considers marriage status, age and education as the most important predictors for income. Figure 18 shows the variable importance of this model. This model requires approx. 5-hours run time on a standard laptop. 
+
+
+```{r, warning=FALSE, message=FALSE}
+fitControl <- trainControl(method = "repeatedcv", number = 10, repeats = 3, search= "grid")
+rfGrid <- expand.grid(.mtry = c(1:10))
+
+rf.fit <- train(income~., data = train, method = "rf", trControl = fitControl, tuneGrid = rfGrid)
+
+forecast <- predict(rf.fit, test)
+
+acc_rf <- mean(forecast == test$income)
+```
+
+### Figure 17: Oucomes of Randome Forest Grid Search and Best Tune
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+plot(rf.fit)
+rf.fit$bestTune
+```
+
+### Figure 18: Variable Importance (top 10), Random Forest Model
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+rfImp <- caret::varImp(rf.fit)
+plot(rfImp, top = 10)
+```
+
+### Comparative Model Performance: Random Forest
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+accuracy <- bind_rows(accuracy, data_frame(method = "R.Forest", Accuracy = acc_rf))
+accuracy %>% knitr::kable()
+```
+
+
+## 4.5 Gradient Boosting Machines (GBM)
+
+Like Random Forest, Gradient Boosting Machines are an ensemble decision tree model. The difference to Random Forest is that the trees are not random, but each tree systematically builds on the weaknesses of the previous tree. GBM algorithms recently dominate winning Kaggle competition algorithms and are now commonly used for classification problems. The tune grid for GBM allows for the following main hyper parameters:
+
+1. The number of trees
+2. Interaction depth: Number of splits to perform on a tree (starting from a single node)
+3. Learn rate (shrinkage): Multiplier that determines how quickly an error is corrected from one tree to the next
+4. Minimum number of observations in the terminal nodes
+
+We run a GBM grid search with 500 to 3,000 trees, interaction depth between 3 and 11, learn rates of 0.1 and 0.01, and a minimum split rule of 10 observations in the final nodes. We also apply repeated 10-fold cross validation to further improve the model performance. Figure 19 shows the outcome of the grid search. The run time for this grid search is approx. 10-hours on a standard laptop.
+
+The grid search reveals that best results are achieved with 1,500 trees, a learn rate of 0.01 and interaction depth of 11. The results and accuracy are shown below. Like Random Forest, the Gradient Boosting model regards marriage status, education and age as the most important predictors for income. Figure 20 shows the variable importance of the GBM model. 
+
+```{r, warning=FALSE, message=FALSE}
+fitControl <- trainControl(method = "repeatedcv", number = 10, repeats = 3)
+gbmGrid <-  expand.grid(interaction.depth = seq(3,11,2), n.trees = seq(500,3000,500), 
+                        shrinkage = c(0.1, 0.01), n.minobsinnode = 10)
+
+gbm.fit <- train(income ~ ., data = train, method = "gbm", 
+                 trControl = fitControl, tuneGrid = gbmGrid)
+
+forecast <- predict(gbm.fit, test)
+
+acc_gbm <- mean(forecast == test$income)
+```
+
+### Figure 19: GBM Grid Search Outcomes and Best Tune
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+plot(gbm.fit)
+gbm.fit$bestTune
+```
+
+### Figure 20: Variable Importance (top 10), GBM Model
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+gbmImp <- caret::varImp(gbm.fit)
+plot(gbmImp, top = 10)
+```
+
+### Comparative Model Performance: Gradien Boosting Machines (GBM)
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+accuracy <- bind_rows(accuracy, data_frame(method = "Gbm", Accuracy = acc_gbm))
+accuracy %>% knitr::kable()
+```
+
+
+# 5. Results
+
+We have compared four different machine learning models with regards to prediction accuracy: Linear Discriminant Analysis (LDA), K Nearest Neighbors (Knn), Random Forest and Gradient Boosting Machines. GBM delivers the best result. The grid search delivers best tuning parameters of 1,500 trees, interaction depth of 11, learn rate 0.01, and a final split rule of minimum 10 observations in the final node. This model will be chosen as the final model.
+
+
+## 5.1 Validating the Final Model
+
+We validate the final model on the validation data set with the below result. We can see that accuracy holds up. That means the model is robust and well fitted.
+
+### Final Model: Validation against Validation Data Set
+
+```{r, warning=FALSE, message=FALSE}
+forecast <- predict(gbm.fit, validation)
+
+validation_final <- mean(forecast == validation$income)
+```
+
+### Final Model Performance
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+accuracy <- data_frame(method = "Final Model (GBM)", Accuracy = validation_final)
+accuracy %>% knitr::kable()
+```
+
+## 5.2 Discussion
+
+The Gradient Boosting Model has outperformed Random Forest, Knn and Linear Discriminant Analysis in this project. However, all models perform in a similar range with the accuracy of the final model being approx. 2% percentage points better than the weakest model (Knn).
+
+Run time on a standard laptop has been a limiter for this analysis and did not allow for a more comprehensive grid search on the various approaches. The total run time for the code for this assignment is approx. 24 hours on a standard Dell laptop. Where possible, it is recommended to run the algorithms on a server, which would allow for a more comprehensive grid search and potentially further optimisation. 
+
+We have seen that both the Random Forest and the GBM model regard marriage status, age and education as the most important drivers for income prediction. Gender still appears in the top 10, but race and native country don't. We have performed various iterations of the model taking these variables, specifically race and native country, out. However, the best model performance was achieved leaving all variables in. Therefore only this solution has been discussed here. 
+
+We note that the census data set used in this project does not include all variables that may impact earnings potential. For example, while grade and level of education are provided, the field of study is not. However, we know that different fields of study are associate with different earnings potential on average. Equally the same functional work occupations may be associated with different earnings potential across different industries. 
+
+The year 1994 was a year of strong economic growth in the US. It is possible that the factors predicting high income may be different in a stagnant or downturn economy. 
+
+
+# 6. Conclusion
+
+In this project we have looked at the 1994 US Census that provides income data along with general population characteristics, i.e. age, education, occupation, relationship status, race, gender and native country of the individual surveyed. The aim of the project was to train a machine learning algorithm to predict, if an individual makes over 50,000 dollars per year. 50k in 1994 is equal to the purchasing power of 90k today. That means the income bracket refers to the approx. top 15% income earners in the US. 
+
+Following general data exploration we have compared four different machine learning approaches on forecast accuracy: Linear Discriminant Analysis (LDA), K Nearest Neighbours (Knn), Random Forest and Gradient Boosting Machines (GBM). GBM delivers the best results outperforming the other models. A grid search led to optimal tuning parameters of 1,500 trees, interaction depth of 11, learning rate of 0.01 and minimum split rule of 10 observations for the final nodes. 
+
+The final model has been validated on a validation data set with below final result:
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+accuracy <- data_frame(method = "Final Model (GBM)", Accuracy = validation_final)
+accuracy %>% knitr::kable()
+```
+
+
+
+
